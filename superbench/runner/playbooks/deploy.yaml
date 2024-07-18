@@ -1,0 +1,111 @@
+- name: Facts Gathering
+  hosts: all
+  gather_facts: true
+
+- name: Context Preparation
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  tasks:
+    - name: Generating SSH Config
+      template:
+        src: ../templates/ssh_config.j2
+        dest: '{{ output_dir }}/ssh_config'
+        mode: 0640
+    - name: Generating SSH Key Pair
+      community.crypto.openssh_keypair:
+        path: '{{ output_dir }}/id_ed25519'
+        type: ed25519
+        comment: superbench
+        force: no
+
+- name: Check GPU Environment
+  hosts: all
+  gather_facts: false
+  tasks:
+    - name: Checking NVIDIA GPU Environment
+      stat:
+        path: '{{ item }}'
+      with_items:
+        - /dev/nvidiactl
+        - /dev/nvidia-uvm
+      register: nvidia_dev
+    - name: Checking AMD GPU Environment
+      stat:
+        path: '{{ item }}'
+      with_items:
+        - /dev/kfd
+        - /dev/dri
+      register: amd_dev
+    - name: Set GPU Facts
+      set_fact:
+        nvidia_gpu_exist: >-
+          {{ nvidia_dev.results[0].stat.ischr is defined and nvidia_dev.results[0].stat.ischr and
+          nvidia_dev.results[1].stat.ischr is defined and nvidia_dev.results[1].stat.ischr }}
+        amd_gpu_exist: >-
+          {{ amd_dev.results[0].stat.ischr is defined and amd_dev.results[0].stat.ischr and
+          amd_dev.results[1].stat.isdir is defined and amd_dev.results[1].stat.isdir }}
+    - name: Print GPU Checking Result
+      debug:
+        msg:
+          - "NVIDIA GPU {{ 'detected' if nvidia_gpu_exist else 'not operational, pls confirm nvidia_uvm kernel module is loaded and /dev/nvidia-uvm exists' }}"
+          - "AMD GPU {{ 'detected' if amd_gpu_exist else 'not operational, pls confirm amdgpu kernel module is loaded' }}"
+
+- name: Remote Deployment
+  hosts: all
+  gather_facts: false
+  vars:
+    workspace: '{{ ansible_user_dir }}/sb-workspace'
+    container: sb-workspace
+  tasks:
+    - name: Creating Workspace
+      file:
+        path: '{{ item }}'
+        state: directory
+        mode: 0755
+      with_items:
+        - '{{ workspace }}'
+        - '{{ workspace }}/.ssh'
+    - name: Copying Context
+      copy:
+        src: '{{ item.src }}'
+        dest: '{{ item.dest }}'
+        mode: '{{ item.mode }}'
+      with_items:
+        - src: '{{ output_dir }}/ssh_config'
+          dest: '{{ workspace }}/.ssh/config'
+          mode: '644'
+        - src: '{{ output_dir }}/id_ed25519.pub'
+          dest: '{{ workspace }}/.ssh/authorized_keys'
+          mode: '644'
+        - src: '{{ output_dir }}/id_ed25519'
+          dest: '{{ workspace }}/.ssh/key'
+          mode: '400'
+      become: yes
+    - name: Trying to Login Registry
+      shell: |
+        docker login {{ docker_registry }} --username {{ docker_username }} --password {{ docker_password }}
+      become: yes
+      when: docker_registry is defined
+      ignore_errors: true
+    - name: Pulling Container Image
+      shell: |
+        docker pull {{ docker_image }}
+      become: yes
+      when: docker_pull | default(true)
+      throttle: 32
+    - name: Starting Container
+      shell: |
+        docker rm --force {{ container }} ||: && \
+        docker run -itd --name={{ container }} \
+          --privileged --net=host --ipc=host \
+          {{ '--gpus=all' if nvidia_gpu_exist else '' }} \
+          {{ '--security-opt seccomp=unconfined --group-add video --device=/dev/kfd --device=/dev/dri --cap-add=SYS_PTRACE --shm-size=16G' if amd_gpu_exist else '' }} \
+          -w /root -v {{ workspace }}:/root -v /mnt:/mnt \
+          -v /var/run/docker.sock:/var/run/docker.sock \
+          --entrypoint /bin/bash {{ docker_image }} && \
+        docker exec {{ container }} bash -c \
+          "chown -R root:root ~ && \
+          sed -i 's/[# ]*Port.*/Port {{ ssh_port }}/g' /etc/ssh/sshd_config && \
+          service ssh restart && sb help"
+      become: yes

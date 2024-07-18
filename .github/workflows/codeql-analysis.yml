@@ -1,0 +1,63 @@
+name: "CodeQL"
+
+on:
+  push:
+    branches:
+      - main
+      - release/*
+  pull_request:
+    branches:
+      - main
+      - release/*
+  schedule:
+    - cron: "30 1 * * 1"
+
+jobs:
+  analyze:
+    name: CodeQL analyze ${{ matrix.language }}
+    runs-on: ubuntu-latest
+    permissions:
+      actions: read
+      contents: read
+      security-events: write
+    strategy:
+      fail-fast: false
+      matrix:
+        language:
+          - python
+          - javascript
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v3
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@v2
+        with:
+          languages: ${{ matrix.language }}
+      - name: Autobuild
+        uses: github/codeql-action/autobuild@v2
+      - name: Perform CodeQL Analysis
+        uses: github/codeql-action/analyze@v2
+  analyze-cpp:
+    name: CodeQL analyze cpp
+    runs-on: ubuntu-latest
+    container:
+      image: nvcr.io/nvidia/pytorch:20.12-py3
+    permissions:
+      actions: read
+      contents: read
+      security-events: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v3
+      - name: Install Dependency
+        run: |
+          DEBIAN_FRONTEND=noninteractive apt-get update
+          DEBIAN_FRONTEND=noninteractive apt-get install -y ffmpeg libavcodec-dev libavformat-dev libavutil-dev libswresample-dev sudo
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@v2
+        with:
+          languages: cpp
+      - name: Build
+        run: make cppbuild -j
+      - name: Perform CodeQL Analysis
+        uses: github/codeql-action/analyze@v2

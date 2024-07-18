@@ -1,0 +1,32 @@
+[submodule "third_party/cutlass"]
+	path = third_party/cutlass
+	url = https://github.com/NVIDIA/cutlass.git
+	branch = v2.4.0
+[submodule "third_party/perftest"]
+	path = third_party/perftest
+	url = https://github.com/linux-rdma/perftest.git
+[submodule "third_party/nccl-tests"]
+	path = third_party/nccl-tests
+	url = https://github.com/NVIDIA/nccl-tests.git
+[submodule "third_party/fio"]
+	path = third_party/fio
+	url = https://github.com/axboe/fio.git
+	branch = master
+[submodule "third_party/rccl-tests"]
+	path = third_party/rccl-tests
+	url = https://github.com/ROCmSoftwarePlatform/rccl-tests.git
+[submodule "third_party/GPCNET"]
+	path = third_party/GPCNET
+	url = https://github.com/netbench/GPCNET.git
+[submodule "third_party/gpu-burn"]
+	path = third_party/gpu-burn
+	url = https://github.com/wilicc/gpu-burn.git
+[submodule "third_party/msccl"]
+	path = third_party/msccl
+	url = https://github.com/Azure/msccl
+[submodule "third_party/Megatron/Megatron-LM"]
+	path = third_party/Megatron/Megatron-LM
+	url = https://github.com/NVIDIA/Megatron-LM.git
+[submodule "third_party/Megatron/Megatron-DeepSpeed"]
+	path = third_party/Megatron/Megatron-DeepSpeed
+	url = https://github.com/microsoft/Megatron-DeepSpeed.git

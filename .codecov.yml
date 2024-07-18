@@ -1,0 +1,29 @@
+codecov:
+  require_ci_to_pass: yes
+
+flag_management:
+  default_rules:
+    carryforward: true
+    paths:
+      - superbench/
+
+coverage:
+  status:
+    project:
+      default:
+        target: 80%
+        threshold: 1%
+        flags:
+          - cpu-python3.6-unit-test
+          - cpu-python3.7-unit-test
+          - cuda-unit-test
+          - directx-unit-test
+    patch:
+      default:
+        target: 80%
+        threshold: 1%
+        flags:
+          - cpu-python3.6-unit-test
+          - cpu-python3.7-unit-test
+          - cuda-unit-test
+          - directx-unit-test
