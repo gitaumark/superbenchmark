@@ -67,23 +67,22 @@ void process_args(int argc, char **argv, Args *args) {
     }
 }
 
-template <typename T> __global__ void init_matrix(T *matrix, const fp32 val, const size_t N) {
-    size_t tid = blockIdx.x * blockDim.x + threadIdx.x;
-    for (size_t i = tid; i < N; i += gridDim.x * blockDim.x) {
-        matrix[i] = T(val);
-    }
+__global__ void init_curand_states(curandState* states){
+        int tid = threadIdx.x + blockIdx.x * blockDim.x;
+        curand_init(1, tid, 0, &states[tid]);
+        curand_uniform(&states[tid]);
 }
 
-template <typename T> __global__ void randomizeMatrix(T* matrix, const fp32 seed, const size_t N) {
+template <typename T>
+__global__ void cuda_array_init_randu(T *array, const size_t N, curandState *state, float min, float max){
     size_t tid = blockIdx.x * blockDim.x + threadIdx.x;
-   
- 
-    curandState state;
-    curand_init(seed, tid, 0, &state);
+    curandState tstate = state[tid];
+
     for (size_t i = tid; i < N; i += gridDim.x * blockDim.x) {
-        matrix[i] = T(curand_uniform(&state));
+        array[i] = T(min + (max-min)*curand_uniform(&tstate));
     }
-    // matrix[index] = curand_uniform(&state); // Generate a random number between 0 and 1
+
+    state[tid] = tstate;
 }
 
 template <typename T> cudaDataType_t get_datatype() {
@@ -115,8 +114,12 @@ float timing_matmul_tn(size_t m, size_t n, size_t k, size_t batch, int warmup, i
     cudaMalloc(&matrix_b, k * n * batch * sizeof(Tb));
     cudaMalloc(&matrix_out, m * n * batch * sizeof(Tout));
 
-    randomizeMatrix<Ta><<<216, 1024>>>(matrix_a, 1.f, m * k * batch);
-    randomizeMatrix<Tb><<<216, 1024>>>(matrix_b, 2.f, k * n * batch);
+
+    curandState* deviceStates;
+    cudaMalloc((void **)&deviceStates, 216*1024*sizeof(curandState));
+    init_curand_states<<<216, 1024>>>(deviceStates);
+    cuda_array_init_randu<Ta><<<216, 1024>>>(matrix_a, m * k * batch, deviceStates, -1, 1);
+    cuda_array_init_randu<Tb><<<216, 1024>>>(matrix_b, k * n * batch, deviceStates, -1, 1);
 
     // init gemm
     size_t lda = k, ldb = k, ldd = m;
