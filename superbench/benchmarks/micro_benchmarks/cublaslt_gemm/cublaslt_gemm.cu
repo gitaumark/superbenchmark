@@ -102,6 +102,8 @@ template <typename T> cudaDataType_t get_datatype() {
         return CUDA_R_8F_E5M2;
     if (std::is_same<T, int8>::value)
         return CUDA_R_8I;
+    if (std::is_same<T, fp4e2m1>::value)
+        return CUDA_R_4F;
     throw std::invalid_argument("Unknown type");
 }
 
@@ -186,6 +188,8 @@ int main(int argc, char **argv) {
         run<fp8e5m2, fp8e4m3, fp16>(&args);
     else if (args.in_type == "int8")
         run<int8>(&args);
+    else if (args.in_type == "fp4e2m1")
+        run<fp4e2m1>(&args);
     else
         throw std::invalid_argument("Unknown type " + args.in_type);
 
