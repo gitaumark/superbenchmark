@@ -103,7 +103,7 @@ template <typename T> cudaDataType_t get_datatype() {
     if (std::is_same<T, int8>::value)
         return CUDA_R_8I;
     if (std::is_same<T, fp4e2m1>::value)
-        return CUDA_R_4F;
+        return CUDA_R_4F_E2M1;
     throw std::invalid_argument("Unknown type");
 }
 
