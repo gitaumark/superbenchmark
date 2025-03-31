@@ -3,6 +3,7 @@
 
 #include "cublaslt_utils.h"
 
+
 void cublasLtGemm::Init() {
     cublasLtHandle_t handle;
     CUBLAS_CHECK(cublasLtCreate(&handle));
@@ -64,14 +65,14 @@ void cublasLtGemm::Setup(int m, int n, int k, int batch, int lda, int ldb, int l
         gemm_compute_type = CUBLAS_COMPUTE_64F;
     if (a_type == CUDA_R_8I)
         gemm_compute_type = CUBLAS_COMPUTE_32I;
-    if (a_type == CUDA_R_4F || b_type == CUDA_R_4F)  // Handle FP4
-        gemm_compute_type = CUBLAS_COMPUTE_16F;  // Assuming FP4 accumulates in FP16
+    if (a_type == CUDA_R_4F_E2M1 || b_type == CUDA_R_4F_E2M1)  // Handle FP4
+        gemm_compute_type = CUBLAS_COMPUTE_32F;  // FP4 accumulates in FP32
 
     cublasLtMatmulDesc_t op_desc = nullptr;
     CUBLAS_CHECK(cublasLtMatmulDescCreate(&op_desc, gemm_compute_type, CUDA_R_32F));
     op_desc_.reset(op_desc);
 
-    if (a_type == CUDA_R_8F_E5M2 || b_type == CUDA_R_8F_E5M2 || a_type == CUDA_R_8F_E4M3 || b_type == CUDA_R_8F_E4M3 || a_type == CUDA_R_4F || b_type == CUDA_R_4F) {
+    if (a_type == CUDA_R_8F_E5M2 || b_type == CUDA_R_8F_E5M2 || a_type == CUDA_R_8F_E4M3 || b_type == CUDA_R_8F_E4M3 || a_type == CUDA_R_4F_E2M1 || b_type == CUDA_R_4F_E2M1) {
         // disable fastAccuMode, set to 0
         int8_t fastAccuMode = 1;
         cublasLtMatmulDescSetAttribute(op_desc, CUBLASLT_MATMUL_DESC_FAST_ACCUM, &fastAccuMode, sizeof(fastAccuMode));
