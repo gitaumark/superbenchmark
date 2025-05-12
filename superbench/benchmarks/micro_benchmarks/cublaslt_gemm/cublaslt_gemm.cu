@@ -189,7 +189,7 @@ int main(int argc, char **argv) {
     else if (args.in_type == "int8")
         run<int8>(&args);
     else if (args.in_type == "fp4e2m1")
-        run<fp4e2m1>(&args);
+        run<fp4e2m1, fp4e2m1, fp16>(&args);
     else
         throw std::invalid_argument("Unknown type " + args.in_type);
 
