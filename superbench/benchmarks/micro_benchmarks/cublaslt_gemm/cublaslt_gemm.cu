@@ -4,10 +4,11 @@
 #include <getopt.h>
 #include <memory>
 #include <stdio.h>
-
 #include <curand_kernel.h>
 #include <curand.h>
+
 #include <cuda_fp16.h>
+#include <cuda_fp4.h>
 #include <cuda_fp8.h>
 
 #include "cublaslt_utils.h"
@@ -18,6 +19,7 @@ using fp16 = half;
 using bf16 = nv_bfloat16;
 using fp8e4m3 = __nv_fp8_e4m3;
 using fp8e5m2 = __nv_fp8_e5m2;
+using fp4e2m1 = __nv_fp4_e2m1;
 using int8 = int8_t;
 
 struct Args {
@@ -98,6 +100,8 @@ template <typename T> cudaDataType_t get_datatype() {
         return CUDA_R_8F_E4M3;
     if (std::is_same<T, fp8e5m2>::value)
         return CUDA_R_8F_E5M2;
+    if (std::is_same<T, fp4e2m1>::value)
+        return CUDA_R_4F_E2M1;
     if (std::is_same<T, int8>::value)
         return CUDA_R_8I;
     throw std::invalid_argument("Unknown type");
@@ -108,10 +112,12 @@ float timing_matmul_tn(size_t m, size_t n, size_t k, size_t batch, int warmup, i
     // init matrix
     Ta *matrix_a = nullptr;
     Tb *matrix_b = nullptr;
+    Tc *matrix_c = nullptr;
     Tout *matrix_out = nullptr;
     batch = std::max<size_t>(batch, 1);
     cudaMalloc(&matrix_a, m * k * batch * sizeof(Ta));
     cudaMalloc(&matrix_b, k * n * batch * sizeof(Tb));
+    cudaMalloc(&matrix_c, m * n * batch * sizeof(Tc));
     cudaMalloc(&matrix_out, m * n * batch * sizeof(Tout));
 
 
@@ -120,13 +126,14 @@ float timing_matmul_tn(size_t m, size_t n, size_t k, size_t batch, int warmup, i
     init_curand_states<<<216, 1024>>>(deviceStates);
     cuda_array_init_randu<Ta><<<216, 1024>>>(matrix_a, m * k * batch, deviceStates, -1, 1);
     cuda_array_init_randu<Tb><<<216, 1024>>>(matrix_b, k * n * batch, deviceStates, -1, 1);
+    cuda_array_init_randu<Tc><<<216, 1024>>>(matrix_c, k * n * batch, deviceStates, -1, 1);
 
-    // init gemm
-    size_t lda = k, ldb = k, ldd = m;
+     // init gemm
+    size_t lda = k, ldb = k, ldc = m, ldd = m;
     std::unique_ptr<cublasLtGemm> gemm = std::make_unique<cublasLtGemm>();
     gemm->Init();
-    gemm->Setup(m, n, k, batch, lda, ldb, ldd, get_datatype<Ta>(), get_datatype<Tb>(), get_datatype<Tout>(),
-                CUBLAS_OP_T, CUBLAS_OP_N, CUBLASLT_EPILOGUE_DEFAULT);
+    gemm->Setup(m, n, k, batch, lda, ldb, ldc, ldd, get_datatype<Ta>(), get_datatype<Tb>(), get_datatype<Tc>(),
+                get_datatype<Tout>(), CUBLAS_OP_T, CUBLAS_OP_N, CUBLASLT_EPILOGUE_DEFAULT);
 
     void *workspace = nullptr;
     size_t workspace_size = gemm->GetAlgorithm(1, 2 * m * n);
@@ -159,8 +166,9 @@ float timing_matmul_tn(size_t m, size_t n, size_t k, size_t batch, int warmup, i
     return (time * 1e3 / iter);
 }
 
-template <typename Ta, typename Tb = Ta, typename Tout = Ta> void run(Args *args) {
-    float time_us = timing_matmul_tn<Ta, Tb, Tout>(args->m, args->n, args->k, args->batch, args->warmup, args->iter);
+template <typename Ta, typename Tb = Ta, typename Tout = Ta, typename Tc = Tout> void run(Args *args) {
+    float time_us =
+        timing_matmul_tn<Ta, Tb, Tout, Tc>(args->m, args->n, args->k, args->batch, args->warmup, args->iter);
     // m n k batch time_us tflops
     printf("%d\t%d\t%d\t%d\t%f\t%f\n", args->m, args->n, args->k, args->batch, time_us,
            float(args->m) * float(args->n) * float(2 * args->k - 1) / 1e6 / time_us * std::max(args->batch, 1));
@@ -182,6 +190,8 @@ int main(int argc, char **argv) {
         run<fp8e4m3, fp8e4m3, fp16>(&args);
     else if (args.in_type == "fp8e5m2")
         run<fp8e5m2, fp8e4m3, fp16>(&args);
+    else if (args.in_type == "fp4e2m1")
+        run<fp4e2m1, fp4e2m1, fp4e2m1, fp16>(&args);
     else if (args.in_type == "int8")
         run<int8>(&args);
     else
