@@ -107,7 +107,7 @@ template <typename T> cudaDataType_t get_datatype() {
     throw std::invalid_argument("Unknown type");
 }
 
-template <typename Ta, typename Tb, typename Tout>
+template <typename Ta, typename Tb, typename Tout, typename Tc>
 float timing_matmul_tn(size_t m, size_t n, size_t k, size_t batch, int warmup, int iter) {
     // init matrix
     Ta *matrix_a = nullptr;
