@@ -90,6 +90,12 @@ void process_args(int argc, char **argv, Args *args) {
     }
 }
 
+__global__ void init_curand_states(curandState* states){
+        int tid = threadIdx.x + blockIdx.x * blockDim.x;
+        curand_init(1, tid, 0, &states[tid]);
+        curand_uniform(&states[tid]);
+}
+
 template <typename T>
 __global__ void cuda_array_init_randu(T *array, const size_t N, curandState *state, float min, float max){
     size_t tid = blockIdx.x * blockDim.x + threadIdx.x;
