@@ -7,9 +7,14 @@
 #include <curand_kernel.h>
 #include <curand.h>
 
+#include <cuda.h>
 #include <cuda_fp16.h>
-#include <cuda_fp4.h>
 #include <cuda_fp8.h>
+
+#if CUDA_VERSION >= 12080
+#include <cuda_fp4.h>
+using fp4e2m1 = __nv_fp4_e2m1;
+#endif
 
 #include "cublaslt_utils.h"
 
@@ -19,7 +24,6 @@ using fp16 = half;
 using bf16 = nv_bfloat16;
 using fp8e4m3 = __nv_fp8_e4m3;
 using fp8e5m2 = __nv_fp8_e5m2;
-using fp4e2m1 = __nv_fp4_e2m1;
 using int8 = int8_t;
 
 struct Args {
@@ -29,16 +33,24 @@ struct Args {
     int batch = 0;
     int warmup = 20;
     int iter = 50;
+    // Default warmup iterations for autotune
+    int warmup_autotune = 20;
+    // Default repeat iterations for autotune
+    int iter_autotune = 50;
     std::string in_type = "fp8e4m3";
+    bool autotune = false;
 };
 
 void process_args(int argc, char **argv, Args *args) {
-    const char *const short_opts = "m:n:k:b:w:i:t:";
+    const char *const short_opts = "m:n:k:b:w:i:t:aI:W:";
     const option long_opts[] = {
         {"batch", required_argument, nullptr, 'b'},
         {"warmup", required_argument, nullptr, 'w'},
         {"iter", required_argument, nullptr, 'i'},
         {"in_type", required_argument, nullptr, 't'},
+        {"autotune", no_argument, nullptr, 'a'},
+        {"iter-autotune", required_argument, nullptr, 'I'},
+        {"warmup-autotune", required_argument, nullptr, 'W'},
     };
 
     int opt = 0;
@@ -65,25 +77,26 @@ void process_args(int argc, char **argv, Args *args) {
         case 't':
             args->in_type = std::string(optarg);
             break;
+        case 'a':
+            args->autotune = true;
+            break;
+        case 'I':
+            args->iter_autotune = std::stoi(optarg);
+            break;
+        case 'W':
+            args->warmup_autotune = std::stoi(optarg);
+            break;
         }
     }
-}
-
-__global__ void init_curand_states(curandState* states){
-        int tid = threadIdx.x + blockIdx.x * blockDim.x;
-        curand_init(1, tid, 0, &states[tid]);
-        curand_uniform(&states[tid]);
 }
 
 template <typename T>
 __global__ void cuda_array_init_randu(T *array, const size_t N, curandState *state, float min, float max){
     size_t tid = blockIdx.x * blockDim.x + threadIdx.x;
     curandState tstate = state[tid];
-
     for (size_t i = tid; i < N; i += gridDim.x * blockDim.x) {
         array[i] = T(min + (max-min)*curand_uniform(&tstate));
     }
-
     state[tid] = tstate;
 }
 
@@ -100,8 +113,10 @@ template <typename T> cudaDataType_t get_datatype() {
         return CUDA_R_8F_E4M3;
     if (std::is_same<T, fp8e5m2>::value)
         return CUDA_R_8F_E5M2;
+#if CUDA_VERSION >= 12080
     if (std::is_same<T, fp4e2m1>::value)
         return CUDA_R_4F_E2M1;
+#endif
     if (std::is_same<T, int8>::value)
         return CUDA_R_8I;
     throw std::invalid_argument("Unknown type");
@@ -136,7 +151,16 @@ float timing_matmul_tn(size_t m, size_t n, size_t k, size_t batch, int warmup, i
                 get_datatype<Tout>(), CUBLAS_OP_T, CUBLAS_OP_N, CUBLASLT_EPILOGUE_DEFAULT);
 
     void *workspace = nullptr;
-    size_t workspace_size = gemm->GetAlgorithm(1, 2 * m * n);
+    size_t workspace_size; 
+
+    if (autotune) {
+        workspace_size = gemm->GetAlgorithmExhaustive(
+            8, 2 * m * n, 1.0f, 0.0f, reinterpret_cast<void *>(matrix_a), reinterpret_cast<void *>(matrix_b),
+            reinterpret_cast<void *>(matrix_out), reinterpret_cast<void *>(matrix_out), iter_autotune, warmup_autotune);
+    } else {
+        workspace_size = gemm->GetAlgorithm(1, 2 * m * n);
+    }
+
     cudaMalloc(&workspace, workspace_size);
 
     // timer
@@ -166,9 +190,9 @@ float timing_matmul_tn(size_t m, size_t n, size_t k, size_t batch, int warmup, i
     return (time * 1e3 / iter);
 }
 
-template <typename Ta, typename Tb = Ta, typename Tout = Ta, typename Tc = Tout> void run(Args *args) {
-    float time_us =
-        timing_matmul_tn<Ta, Tb, Tout, Tc>(args->m, args->n, args->k, args->batch, args->warmup, args->iter);
+template <typename Ta, typename Tb = Ta, typename Tout = Ta, typename Tc = Tout> void run(const Args *args) {
+    float time_us = timing_matmul_tn<Ta, Tb, Tout, Tc>(args->m, args->n, args->k, args->batch, args->warmup, args->iter,
+                                                       args->autotune, args->iter_autotune, args->warmup_autotune);
     // m n k batch time_us tflops
     printf("%d\t%d\t%d\t%d\t%f\t%f\n", args->m, args->n, args->k, args->batch, time_us,
            float(args->m) * float(args->n) * float(2 * args->k - 1) / 1e6 / time_us * std::max(args->batch, 1));
@@ -190,8 +214,10 @@ int main(int argc, char **argv) {
         run<fp8e4m3, fp8e4m3, fp16>(&args);
     else if (args.in_type == "fp8e5m2")
         run<fp8e5m2, fp8e4m3, fp16>(&args);
+#if CUDA_VERSION >= 12080
     else if (args.in_type == "fp4e2m1")
         run<fp4e2m1, fp4e2m1, fp4e2m1, fp16>(&args);
+#endif
     else if (args.in_type == "int8")
         run<int8>(&args);
     else
