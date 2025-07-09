@@ -129,7 +129,8 @@ template <typename T> cudaDataType_t get_datatype() {
 }
 
 template <typename Ta, typename Tb, typename Tout, typename Tc>
-float timing_matmul_tn(size_t m, size_t n, size_t k, size_t batch, int warmup, int iter) {
+float timing_matmul_tn(size_t m, size_t n, size_t k, size_t batch, int warmup, int iter, bool autotune,
+                       int iter_autotune, int warmup_autotune) {
     // init matrix
     Ta *matrix_a = nullptr;
     Tb *matrix_b = nullptr;
